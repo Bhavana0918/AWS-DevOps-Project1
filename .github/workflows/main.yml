@@ -1,0 +1,55 @@
+# .github/workflows/build-and-tag.yml
+name: Build and Tag
+
+on:
+  push:
+    branches:
+      - staging
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+
+      - name: Build with Maven
+        run: mvn clean package
+
+      - name: Create Tag
+        id: create_tag
+        run: |
+          latest_tag=$(git tag -l 'R-2024-0.*' | sort -V | tail -n1)
+          if [ -z "$latest_tag" ]; then
+            new_tag="R-2024-0.1"
+          else
+            latest_number=$(echo $latest_tag | sed -E 's/R-2024-0.//')
+            next_number=$((latest_number + 1))
+            new_tag="R-2024-0.$next_number"
+          fi
+          while git ls-remote --tags origin | grep -q "refs/tags/$new_tag"; do
+            echo "Tag $new_tag already exists. Incrementing tag..."
+            next_number=$((next_number + 1))
+            new_tag="R-2024-0.$next_number"
+          done
+          echo "New tag: $new_tag"
+          git tag $new_tag
+          git push origin $new_tag
+          echo "TAG=$new_tag" >> $GITHUB_ENV
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get install -y gh
+      - name: Authenticate GitHub CLI
+        run: |
+          echo ${{ secrets.GITHUB_TOKEN }} | gh auth login --with-token
+      - name: Create GitHub Release
+        run: |
+          gh release create ${{ env.TAG }} target/mywebsite-0.0.1-SNAPSHOT.jar --title "Release ${{ env.TAG }}" --notes "Automated release for ${{ env.TAG }}"
